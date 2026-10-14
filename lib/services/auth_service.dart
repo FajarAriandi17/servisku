@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'supabase_config.dart';
@@ -88,14 +89,39 @@ class AuthService extends ChangeNotifier {
   }
 
   // ---------- Google ----------
+  /// Android: native Google account picker -> ID token -> Supabase.
+  /// No browser redirect needed, so it works without Redirect URL setup.
+  /// Web: standard Supabase OAuth redirect.
   Future<void> signInWithGoogle() async {
-    await _auth.signInWithOAuth(
-      OAuthProvider.google,
-      redirectTo: _redirect,
-      authScreenLaunchMode: kIsWeb
-          ? LaunchMode.platformDefault
-          : LaunchMode.externalApplication,
-      queryParams: const {'prompt': 'select_account'},
+    if (kIsWeb) {
+      await _auth.signInWithOAuth(
+        OAuthProvider.google,
+        redirectTo: _redirect,
+        queryParams: const {'prompt': 'select_account'},
+      );
+      return;
+    }
+    final google = GoogleSignIn(
+      serverClientId: SupabaseConfig.googleWebClientId,
+      scopes: const ['email', 'profile'],
+    );
+    await google.signOut(); // always show the account picker
+    final account = await google.signIn();
+    if (account == null) {
+      throw const AuthException('Login dibatalkan.', code: 'canceled');
+    }
+    final tokens = await account.authentication;
+    final idToken = tokens.idToken;
+    if (idToken == null) {
+      throw const AuthException(
+        'Google tidak mengembalikan ID token. Periksa Web Client ID.',
+        code: 'no_id_token',
+      );
+    }
+    await _auth.signInWithIdToken(
+      provider: OAuthProvider.google,
+      idToken: idToken,
+      accessToken: tokens.accessToken,
     );
   }
 
@@ -214,12 +240,27 @@ String authErrorMessage(Object e) {
     if (code == 'provider_disabled') {
       return 'Metode login ini belum diaktifkan di Supabase.';
     }
+    if (code == 'canceled') return 'Login dibatalkan.';
+    if (msg.contains('audience') || msg.contains('id token')) {
+      return 'Client ID Google tidak cocok dengan konfigurasi Supabase.';
+    }
     if (code == 'signup_disabled') {
       return 'Pendaftaran akun baru sedang dinonaktifkan.';
     }
     return e.message;
   }
   final s = e.toString();
+  // google_sign_in PlatformException codes
+  if (s.contains('ApiException: 10') || s.contains('sign_in_failed')) {
+    return 'Login Google gagal (konfigurasi). Pastikan Android OAuth Client '
+        'dengan package com.company.servisku & SHA-1 sudah dibuat di Google Cloud Console.';
+  }
+  if (s.contains('ApiException: 7') || s.contains('network_error')) {
+    return 'Tidak ada koneksi internet.';
+  }
+  if (s.contains('sign_in_canceled') || s.contains('ApiException: 12501')) {
+    return 'Login dibatalkan.';
+  }
   if (s.contains('SocketException') ||
       s.contains('Failed host lookup') ||
       s.contains('ClientException')) {

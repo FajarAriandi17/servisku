@@ -10,4 +10,10 @@ class SupabaseConfig {
   /// and email confirmation. Must be added in Supabase:
   /// Authentication → URL Configuration → Redirect URLs.
   static const mobileRedirect = 'com.company.servisku://login-callback';
+
+  /// Google OAuth **Web** client ID — the same one set in
+  /// Supabase → Authentication → Providers → Google.
+  /// Native Android sign-in requests an ID token for this audience.
+  static const googleWebClientId =
+      '992375719488-hajafl518e83vkham5lcr3619cfufhd2.apps.googleusercontent.com';
 }
