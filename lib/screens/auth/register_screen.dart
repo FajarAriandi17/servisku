@@ -46,16 +46,62 @@ class _RegisterScreenState extends State<RegisterScreen> {
     final nav = Navigator.of(context);
     final messenger = ScaffoldMessenger.of(context);
     try {
-      await context.read<AuthService>().registerWithEmail(
+      final auth = context.read<AuthService>();
+      final signedIn = await auth.registerWithEmail(
         _name.text,
         _email.text,
         _password.text,
       );
-      messenger.showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Akun berhasil dibuat! Email verifikasi telah dikirim.',
+      if (signedIn) {
+        messenger.showSnackBar(
+          const SnackBar(
+            content: Text('Akun berhasil dibuat! Selamat datang.'),
           ),
+        );
+        nav.popUntil((r) => r.isFirst);
+        return;
+      }
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          icon: const Icon(
+            Icons.mark_email_read_rounded,
+            size: 48,
+            color: AppColors.primary,
+          ),
+          title: const Text(
+            'Cek email Anda',
+            style: TextStyle(fontWeight: FontWeight.w800),
+          ),
+          content: Text(
+            'Kami mengirim tautan konfirmasi ke ${_email.text.trim()}. '
+            'Buka email tersebut dan klik tautan konfirmasi, lalu masuk '
+            'dengan email & kata sandi Anda.\n\nTidak menerima email? Cek folder Spam.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () async {
+                try {
+                  await auth.resendConfirmation(_email.text);
+                  messenger.showSnackBar(
+                    const SnackBar(
+                      content: Text('Email konfirmasi dikirim ulang.'),
+                    ),
+                  );
+                } catch (e) {
+                  messenger.showSnackBar(
+                    SnackBar(content: Text(authErrorMessage(e))),
+                  );
+                }
+              },
+              child: const Text('Kirim ulang'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Ke halaman masuk'),
+            ),
+          ],
         ),
       );
       nav.popUntil((r) => r.isFirst);

@@ -20,7 +20,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final _notif = NotificationService.instance;
 
   Future<void> _editName(AuthService auth) async {
-    final ctrl = TextEditingController(text: auth.user?.displayName ?? '');
+    final ctrl = TextEditingController(text: auth.rawName);
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -86,8 +86,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final u = auth.user;
     final needsVerify =
         u != null &&
-        (u.email ?? '').isNotEmpty &&
-        !u.emailVerified &&
+        auth.email.isNotEmpty &&
+        !auth.emailVerified &&
         auth.providerLabel == 'Email';
 
     return SafeArea(
@@ -113,15 +113,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         offset: Offset(0, 4),
                       ),
                     ],
-                    image: (u?.photoURL ?? '').isNotEmpty
+                    image: auth.avatarUrl.isNotEmpty
                         ? DecorationImage(
-                            image: NetworkImage(u!.photoURL!),
+                            image: NetworkImage(auth.avatarUrl),
                             fit: BoxFit.cover,
                           )
                         : null,
                   ),
                   alignment: Alignment.center,
-                  child: (u?.photoURL ?? '').isEmpty
+                  child: auth.avatarUrl.isEmpty
                       ? Text(
                           auth.displayName.isEmpty
                               ? '?'
@@ -150,9 +150,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         ),
                       ),
                       Text(
-                        u?.email?.isNotEmpty == true
-                            ? u!.email!
-                            : (u?.phoneNumber ?? ''),
+                        auth.email.isNotEmpty ? auth.email : auth.phone,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(color: Colors.white70),

@@ -66,27 +66,17 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
       return;
     }
     setState(() => _loading = true);
-    final nav = Navigator.of(context);
-    await context.read<AuthService>().sendOtp(
-      _e164,
-      onCodeSent: () {
-        if (!mounted) return;
-        setState(() {
-          _codeSent = true;
-          _loading = false;
-        });
-        _startTimer();
-        _toast('Kode OTP dikirim ke $_e164');
-      },
-      onAutoVerified: () {
-        if (mounted) nav.popUntil((r) => r.isFirst);
-      },
-      onError: (m) {
-        if (!mounted) return;
-        setState(() => _loading = false);
-        _toast(m);
-      },
-    );
+    try {
+      await context.read<AuthService>().sendOtp(_e164, name: _name.text);
+      if (!mounted) return;
+      setState(() => _codeSent = true);
+      _startTimer();
+      _toast('Kode OTP dikirim ke $_e164');
+    } catch (e) {
+      _toast(authErrorMessage(e));
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   Future<void> _verify() async {
@@ -97,7 +87,11 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
     setState(() => _loading = true);
     final nav = Navigator.of(context);
     try {
-      await context.read<AuthService>().verifyOtp(_otp.text, name: _name.text);
+      await context.read<AuthService>().verifyOtp(
+        _e164,
+        _otp.text,
+        name: _name.text,
+      );
       nav.popUntil((r) => r.isFirst);
     } catch (e) {
       _toast(authErrorMessage(e));

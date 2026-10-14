@@ -1,36 +1,29 @@
 import 'dart:async';
 
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/models.dart';
 import 'notification_service.dart';
 
-/// Real-time Firestore data for the signed-in user.
-/// Structure: users/{uid}/vehicles, users/{uid}/reminders, users/{uid}/records
+/// Data for the signed-in user stored in Supabase Postgres.
+/// Tables: vehicles, reminders, records (Row Level Security per user).
 class DataService extends ChangeNotifier {
-  final _db = FirebaseFirestore.instance;
+  SupabaseClient get _db => Supabase.instance.client;
   String? _uid;
-  final List<StreamSubscription> _subs = [];
 
   List<Vehicle> vehicles = [];
   List<ServiceReminder> reminders = [];
   List<ServiceRecord> records = [];
   bool loading = false;
   String? error;
-  final Set<String> _loaded = {};
 
   void bindUser(String? uid) {
     if (uid == _uid) return;
     _uid = uid;
-    for (final s in _subs) {
-      s.cancel();
-    }
-    _subs.clear();
     vehicles = [];
     reminders = [];
     records = [];
-    _loaded.clear();
     error = null;
     if (uid == null) {
       loading = false;
@@ -40,59 +33,46 @@ class DataService extends ChangeNotifier {
     }
     loading = true;
     notifyListeners();
-    _listen('vehicles', (docs) {
-      vehicles = docs.map((d) => Vehicle.fromMap(d.id, d.data())).toList()
-        ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
-    });
-    _listen('reminders', (docs) {
-      reminders = docs
-          .map((d) => ServiceReminder.fromMap(d.id, d.data()))
+    refresh();
+  }
+
+  Future<void> refresh() async {
+    if (_uid == null) return;
+    try {
+      final results = await Future.wait([
+        _db.from('vehicles').select().eq('user_id', _uid!),
+        _db.from('reminders').select().eq('user_id', _uid!),
+        _db.from('records').select().eq('user_id', _uid!),
+      ]);
+      vehicles =
+          results[0].map((d) => Vehicle.fromMap(d['id'] as String, d)).toList()
+            ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+      reminders = results[1]
+          .map((d) => ServiceReminder.fromMap(d['id'] as String, d))
           .toList();
-    });
-    _listen('records', (docs) {
-      records = docs.map((d) => ServiceRecord.fromMap(d.id, d.data())).toList()
-        ..sort((a, b) => b.date.compareTo(a.date));
-    });
+      records =
+          results[2]
+              .map((d) => ServiceRecord.fromMap(d['id'] as String, d))
+              .toList()
+            ..sort((a, b) => b.date.compareTo(a.date));
+      error = null;
+    } on PostgrestException catch (e) {
+      error = (e.code == 'PGRST205' || e.code == '42P01')
+          ? 'Tabel database belum dibuat. Jalankan file supabase/schema.sql di Supabase SQL Editor.'
+          : 'Gagal memuat data: ${e.message}';
+    } catch (e) {
+      error = 'Gagal memuat data. Periksa koneksi internet.';
+      debugPrint('refresh error: $e');
+    }
+    loading = false;
+    notifyListeners();
+    NotificationService.instance.scheduleAll(this);
   }
 
-  void _listen(
-    String name,
-    void Function(List<QueryDocumentSnapshot<Map<String, dynamic>>>) apply,
-  ) {
-    _subs.add(
-      _col(name).snapshots().listen(
-        (snap) {
-          apply(snap.docs);
-          _loaded.add(name);
-          if (_loaded.length >= 3) loading = false;
-          error = null;
-          notifyListeners();
-          _reschedule();
-        },
-        onError: (e) {
-          loading = false;
-          error = e.toString().contains('permission')
-              ? 'Akses database ditolak. Periksa Firestore Security Rules.'
-              : e.toString().contains('not exist') ||
-                    e.toString().contains('NOT_FOUND')
-              ? 'Database Firestore belum dibuat di Firebase Console.'
-              : 'Gagal memuat data: $e';
-          notifyListeners();
-        },
-      ),
-    );
-  }
-
-  CollectionReference<Map<String, dynamic>> _col(String name) =>
-      _db.collection('users').doc(_uid).collection(name);
-
-  Timer? _debounce;
-  void _reschedule() {
-    _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 800), () {
-      NotificationService.instance.scheduleAll(this);
-    });
-  }
+  Map<String, dynamic> _withUser(Map<String, dynamic> m) => {
+    ...m,
+    'user_id': _uid,
+  };
 
   // ------------ Lookups ------------
   Vehicle? vehicleById(String id) {
@@ -112,7 +92,6 @@ class DataService extends ChangeNotifier {
   List<ServiceRecord> recordsFor(String vehicleId) =>
       records.where((r) => r.vehicleId == vehicleId).toList();
 
-  /// Active reminders sorted by urgency across all vehicles.
   List<(ServiceReminder, Vehicle)> get upcoming {
     final list = <(ServiceReminder, Vehicle)>[];
     for (final r in reminders) {
@@ -140,51 +119,70 @@ class DataService extends ChangeNotifier {
   // ------------ Vehicles ------------
   Future<void> saveVehicle(Vehicle v) async {
     if (v.id.isEmpty) {
-      await _col('vehicles').add(v.toMap());
+      await _db.from('vehicles').insert(_withUser(v.toMap()));
     } else {
-      await _col('vehicles').doc(v.id).set(v.toMap());
+      await _db.from('vehicles').update(v.toMap()).eq('id', v.id);
     }
+    await refresh();
   }
 
   Future<String> addVehicle(Vehicle v) async {
-    final ref = await _col('vehicles').add(v.toMap());
-    return ref.id;
+    final row = await _db
+        .from('vehicles')
+        .insert(_withUser(v.toMap()))
+        .select('id')
+        .single();
+    await refresh();
+    return row['id'] as String;
   }
 
   Future<void> updateOdometer(Vehicle v, int km) async {
-    await _col(
-      'vehicles',
-    ).doc(v.id).update({'currentKm': km, 'kmUpdatedAt': Timestamp.now()});
+    await _db
+        .from('vehicles')
+        .update({
+          'current_km': km,
+          'km_updated_at': DateTime.now().toUtc().toIso8601String(),
+        })
+        .eq('id', v.id);
+    await refresh();
   }
 
   Future<void> deleteVehicle(String id) async {
-    final batch = _db.batch();
-    for (final r in reminders.where((r) => r.vehicleId == id)) {
-      batch.delete(_col('reminders').doc(r.id));
-    }
-    for (final r in records.where((r) => r.vehicleId == id)) {
-      batch.delete(_col('records').doc(r.id));
-    }
-    batch.delete(_col('vehicles').doc(id));
-    await batch.commit();
+    // reminders & records cascade-delete via foreign keys
+    await _db.from('vehicles').delete().eq('id', id);
+    await refresh();
   }
 
   // ------------ Reminders ------------
   Future<void> saveReminder(ServiceReminder r) async {
     if (r.id.isEmpty) {
-      await _col('reminders').add(r.toMap());
+      await _db.from('reminders').insert(_withUser(r.toMap()));
     } else {
-      await _col('reminders').doc(r.id).set(r.toMap());
+      await _db.from('reminders').update(r.toMap()).eq('id', r.id);
     }
+    await refresh();
   }
 
-  Future<void> toggleReminder(ServiceReminder r, bool active) =>
-      _col('reminders').doc(r.id).update({'active': active});
+  Future<void> addReminders(List<ServiceReminder> list) async {
+    if (list.isEmpty) return;
+    await _db
+        .from('reminders')
+        .insert(list.map((r) => _withUser(r.toMap())).toList());
+    await refresh();
+  }
 
-  Future<void> deleteReminder(String id) => _col('reminders').doc(id).delete();
+  Future<void> toggleReminder(ServiceReminder r, bool active) async {
+    await _db.from('reminders').update({'active': active}).eq('id', r.id);
+    await refresh();
+  }
 
-  /// Logs a completed service: creates a record, resets the reminder's
-  /// baseline, and bumps the odometer if the new KM is higher.
+  Future<void> deleteReminder(String id) async {
+    await _db.from('reminders').delete().eq('id', id);
+    await refresh();
+  }
+
+  /// Logs a completed service, resets the reminder baseline and bumps
+  /// the odometer if needed.
   Future<void> completeService({
     required Vehicle vehicle,
     ServiceReminder? reminder,
@@ -196,45 +194,47 @@ class DataService extends ChangeNotifier {
     required String workshop,
     required String notes,
   }) async {
-    final batch = _db.batch();
-    batch.set(
-      _col('records').doc(),
-      ServiceRecord(
-        id: '',
-        vehicleId: vehicle.id,
-        reminderId: reminder?.id,
-        title: title,
-        category: category,
-        date: date,
-        km: km,
-        cost: cost,
-        workshop: workshop,
-        notes: notes,
-      ).toMap(),
-    );
+    await _db
+        .from('records')
+        .insert(
+          _withUser(
+            ServiceRecord(
+              id: '',
+              vehicleId: vehicle.id,
+              reminderId: reminder?.id,
+              title: title,
+              category: category,
+              date: date,
+              km: km,
+              cost: cost,
+              workshop: workshop,
+              notes: notes,
+            ).toMap(),
+          ),
+        );
     if (reminder != null) {
-      batch.update(_col('reminders').doc(reminder.id), {
-        'lastServiceDate': Timestamp.fromDate(date),
-        'lastServiceKm': km,
-      });
+      await _db
+          .from('reminders')
+          .update({
+            'last_service_date': date.toUtc().toIso8601String(),
+            'last_service_km': km,
+          })
+          .eq('id', reminder.id);
     }
     if (km > vehicle.currentKm) {
-      batch.update(_col('vehicles').doc(vehicle.id), {
-        'currentKm': km,
-        'kmUpdatedAt': Timestamp.now(),
-      });
+      await _db
+          .from('vehicles')
+          .update({
+            'current_km': km,
+            'km_updated_at': DateTime.now().toUtc().toIso8601String(),
+          })
+          .eq('id', vehicle.id);
     }
-    await batch.commit();
+    await refresh();
   }
 
-  Future<void> deleteRecord(String id) => _col('records').doc(id).delete();
-
-  @override
-  void dispose() {
-    for (final s in _subs) {
-      s.cancel();
-    }
-    _debounce?.cancel();
-    super.dispose();
+  Future<void> deleteRecord(String id) async {
+    await _db.from('records').delete().eq('id', id);
+    await refresh();
   }
 }

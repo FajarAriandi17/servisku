@@ -62,17 +62,18 @@ class _VehicleFormScreenState extends State<VehicleFormScreen> {
       } else {
         final id = await data.addVehicle(vehicle);
         if (_addPresets) {
-          for (final key in ['oli', 'servis', 'pajak']) {
-            final p = presetFor(key);
-            await data.saveReminder(
+          await data.addReminders([
+            for (final key in ['oli', 'servis', 'pajak'])
               ServiceReminder(
                 id: '',
                 vehicleId: id,
-                title: p.title,
-                category: p.key,
-                mode: p.mode,
-                intervalMonths: p.months,
-                intervalKm: _type == VehicleType.motor ? p.kmMotor : p.kmMobil,
+                title: presetFor(key).title,
+                category: key,
+                mode: presetFor(key).mode,
+                intervalMonths: presetFor(key).months,
+                intervalKm: _type == VehicleType.motor
+                    ? presetFor(key).kmMotor
+                    : presetFor(key).kmMobil,
                 lastServiceDate: DateTime.now(),
                 lastServiceKm: kmVal,
                 notifyDaysBefore: 7,
@@ -81,8 +82,7 @@ class _VehicleFormScreenState extends State<VehicleFormScreen> {
                 notes: '',
                 createdAt: DateTime.now(),
               ),
-            );
-          }
+          ]);
         }
       }
       nav.pop();

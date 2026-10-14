@@ -1,12 +1,10 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 import '../theme.dart';
 
 DateTime _toDate(dynamic v) {
-  if (v is Timestamp) return v.toDate();
-  if (v is DateTime) return v;
-  if (v is String) return DateTime.tryParse(v) ?? DateTime.now();
+  if (v is DateTime) return v.toLocal();
+  if (v is String) return DateTime.tryParse(v)?.toLocal() ?? DateTime.now();
   if (v is int) return DateTime.fromMillisecondsSinceEpoch(v);
   return DateTime.now();
 }
@@ -68,11 +66,11 @@ class Vehicle {
     type: (d['type'] as String?) == 'mobil'
         ? VehicleType.mobil
         : VehicleType.motor,
-    currentKm: _toInt(d['currentKm']),
-    avgKmPerDay: _toInt(d['avgKmPerDay'], 30),
-    kmUpdatedAt: _toDate(d['kmUpdatedAt']),
+    currentKm: _toInt(d['current_km']),
+    avgKmPerDay: _toInt(d['avg_km_per_day'], 30),
+    kmUpdatedAt: _toDate(d['km_updated_at']),
     colorValue: _toInt(d['color'], AppColors.primary.toARGB32()),
-    createdAt: _toDate(d['createdAt']),
+    createdAt: _toDate(d['created_at']),
   );
 
   Map<String, dynamic> toMap() => {
@@ -81,11 +79,11 @@ class Vehicle {
     'plate': plate,
     'year': year,
     'type': type.name,
-    'currentKm': currentKm,
-    'avgKmPerDay': avgKmPerDay,
-    'kmUpdatedAt': Timestamp.fromDate(kmUpdatedAt),
+    'current_km': currentKm,
+    'avg_km_per_day': avgKmPerDay,
+    'km_updated_at': kmUpdatedAt.toUtc().toIso8601String(),
     'color': colorValue,
-    'createdAt': Timestamp.fromDate(createdAt),
+    'created_at': createdAt.toUtc().toIso8601String(),
   };
 }
 
@@ -228,39 +226,39 @@ class ServiceReminder {
     final m = (d['mode'] as String?) ?? 'month';
     return ServiceReminder(
       id: id,
-      vehicleId: (d['vehicleId'] as String?) ?? '',
+      vehicleId: (d['vehicle_id'] as String?) ?? '',
       title: (d['title'] as String?) ?? 'Servis',
       category: (d['category'] as String?) ?? 'servis',
       mode: IntervalMode.values.firstWhere(
         (e) => e.name == m,
         orElse: () => IntervalMode.month,
       ),
-      intervalMonths: _toInt(d['intervalMonths'], 3),
-      intervalKm: _toInt(d['intervalKm'], 2000),
-      lastServiceDate: _toDate(d['lastServiceDate']),
-      lastServiceKm: _toInt(d['lastServiceKm']),
-      notifyDaysBefore: _toInt(d['notifyDaysBefore'], 7),
-      notifyKmBefore: _toInt(d['notifyKmBefore'], 200),
+      intervalMonths: _toInt(d['interval_months'], 3),
+      intervalKm: _toInt(d['interval_km'], 2000),
+      lastServiceDate: _toDate(d['last_service_date']),
+      lastServiceKm: _toInt(d['last_service_km']),
+      notifyDaysBefore: _toInt(d['notify_days_before'], 7),
+      notifyKmBefore: _toInt(d['notify_km_before'], 200),
       active: (d['active'] as bool?) ?? true,
       notes: (d['notes'] as String?) ?? '',
-      createdAt: _toDate(d['createdAt']),
+      createdAt: _toDate(d['created_at']),
     );
   }
 
   Map<String, dynamic> toMap() => {
-    'vehicleId': vehicleId,
+    'vehicle_id': vehicleId,
     'title': title,
     'category': category,
     'mode': mode.name,
-    'intervalMonths': intervalMonths,
-    'intervalKm': intervalKm,
-    'lastServiceDate': Timestamp.fromDate(lastServiceDate),
-    'lastServiceKm': lastServiceKm,
-    'notifyDaysBefore': notifyDaysBefore,
-    'notifyKmBefore': notifyKmBefore,
+    'interval_months': intervalMonths,
+    'interval_km': intervalKm,
+    'last_service_date': lastServiceDate.toUtc().toIso8601String(),
+    'last_service_km': lastServiceKm,
+    'notify_days_before': notifyDaysBefore,
+    'notify_km_before': notifyKmBefore,
     'active': active,
     'notes': notes,
-    'createdAt': Timestamp.fromDate(createdAt),
+    'created_at': createdAt.toUtc().toIso8601String(),
   };
 }
 
@@ -292,8 +290,8 @@ class ServiceRecord {
   factory ServiceRecord.fromMap(String id, Map<String, dynamic> d) =>
       ServiceRecord(
         id: id,
-        vehicleId: (d['vehicleId'] as String?) ?? '',
-        reminderId: d['reminderId'] as String?,
+        vehicleId: (d['vehicle_id'] as String?) ?? '',
+        reminderId: d['reminder_id'] as String?,
         title: (d['title'] as String?) ?? 'Servis',
         category: (d['category'] as String?) ?? 'servis',
         date: _toDate(d['date']),
@@ -304,11 +302,11 @@ class ServiceRecord {
       );
 
   Map<String, dynamic> toMap() => {
-    'vehicleId': vehicleId,
-    'reminderId': reminderId,
+    'vehicle_id': vehicleId,
+    'reminder_id': reminderId,
     'title': title,
     'category': category,
-    'date': Timestamp.fromDate(date),
+    'date': date.toUtc().toIso8601String(),
     'km': km,
     'cost': cost,
     'workshop': workshop,
